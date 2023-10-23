@@ -1,0 +1,154 @@
+---
+title: "R Sharing session - diversity"
+author: "Chong Kwek Yan"
+date: '2023-10-22'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data
+
+You're welcome to use your own data. Otherwise, you can use the data from the `novelforestSG` R package.
+
+```{r}
+library(novelforestSG)
+```
+
+After loading this library, the data we will be using can simply be accessed by typing `novelforest_data`. It looks something like this:
+
+```{r}
+head(novelforest_data)
+```
+
+Community ecology data is often handled as a table of sample sites (as rows) by species (as columns), with either the presences/absences or some measure of abundances of each species at each site in the cells.
+
+Let's say that we are simply interested here in the basal area at breast height of trees as an abundance measure.
+
+```{r}
+novelforest_data$ba_2011 <- pi*(novelforest_data$dbh_2011/2)^2
+```
+
+You can get from the 'long' form of the data above to this desired 'wide' form by the `base` R function `xtabs()`, which stands for 'cross-tabulations', i.e., to cross-tabulate basal area (summed) by plots (as rows) against species (as columns). This is also known as a 'pivot table'. Whatever is your abundance measure is on the left of the `~` and is automatically summed.
+
+```{r}
+comm <- xtabs(ba_2011 ~ plot + species, data = novelforest_data)
+
+comm[1:10, 1:4]
+```
+
+This table is what is usually meant by the 'community composition' of samples, sites, assemblages, etc. Each species is a property of the site, measured by abundance. Each row in this table has as many properties, or 'variables' as there are species. This is why composition of communities is described as 'multivariate'--or multidimensional--data. However, multivariate data in its raw form is complex, so we often wish to simplify it, e.g., by reducing it to a single number for each sample that describes one particular property of that sample, drawing from information on other properties. 'Diversity' is one of these properties.
+
+## Part I: Calculating diversity
+
+The first part of this session is on calculating various measures of 'diversity' for each sample, assemblage, etc. This is called $\alpha$ ('alpha') diversity, or 'local' diversity.
+
+The `vegan` R package is a well-established package for dealing with community ecology data.
+
+```{r cars}
+library(vegan)
+```
+
+In a nutshell, diversity consists of two components. One is the 'richness' component, which is simply the number of different things (in this case, number of species).
+
+```{r}
+(alpha_d0 <- specnumber(comm))
+```
+
+The other component is 'evenness', i.e., how equally distributed the quantities are of individual things--in this case, the relative abundances of species. Note that for this to be meaningful, the relative quantities must be on the same units. E.g., it is meaningless if some species are in counts while others are in cover, biomass, etc. For the same richness, composition that is more even is considered more diverse.
+
+The problem is: how much 'weight' to place on the evenness of communities to derive diversity? If no weight at all, i.e., relative abundances are not taken into account, then diversity is simply richness.
+
+### Shannon's diversity? Simpson's diversity?
+
+One diversity measure commonly taught in introductory ecology classes is the Shannon index, also known as the Shannon-Weiner index, or Shannon entropy.
+
+```{r}
+(alpha_sh <- diversity(comm, index = "shannon"))
+```
+
+Another commonly taught diversity measure is the Simpson index, or more accurately the _complement_ of the Simpson index, also known as the Gini-Simpson index.
+
+```{r}
+(alpha_si <- diversity(comm, index = "simpson"))
+```
+
+The problem is that all these measures of diversity are on different 'scales'. Richness is simply a count of the number of species. Shannon's diversity usually ranges for about 1 to 3 for most communities. The Gini-Simpson index ranges from 0 to 1.
+
+```{r}
+boxplot(cbind(alpha_d0, alpha_sh, alpha_si),
+        names = c("Richness", "Shannon", "Gini-Simpson"))
+```
+
+If you have heard anyone say that "The Simpson index is more strongly weighted on evenness than the Shannon index", this is wrong. Since the values are on different scales, it is meaningless to compare them.
+
+### Hill numbers
+
+The older ecology textbooks are mostly outdated because they have not incorporated recent understanding of how the various diversity indices are all related. Luckily, it's not too difficult to catch up. By simple transformations of the two commonly-used classic diversity indices, the Shannon and the Simpson, we can get them all on the same scale as richness. In fact, they are all sequential along an 'order' (commonly denoted as 'q') from zero to two.
+
+q = 0 or zeroth order is simply richness.
+
+q = 1 or first order is the exponential of Shannon's diversity:
+
+```{r}
+(alpha_d1 <- exp(diversity(comm, index = "shannon")))
+```
+
+q = 2 or second order is another form of the Simpson index, known as the inverse Simpson index.
+
+```{r}
+(alpha_d2 <- diversity(comm, index = "invsimpson"))
+```
+
+These measures of diversity are called Hill's equivalent numbers of species. Now, you can say that with increasing order from q = 0 to q = 2, there is increasing weight on evenness or relative abundance of species.
+
+```{r}
+boxplot(cbind(alpha_d0, alpha_d1, alpha_d2),
+        names = c(0, 1, 2), xlab = "Order of diversity")
+```
+
+It might look like they're still not on the same 'scale', but in fact the reduction in value with increasing order represents the effect of evenness. The equivalent of a 'number of species' measure of diversity drops when the community is not perfectly even; vice versa, only when the community is perfectly even will Hill numbers with q>0 be exactly equal to that of q = 0.
+
+
+### Explore!
+
+The `novelforestSG` package contains the raw data used in the analyses for the scientific paper. You can access the raw data too.
+
+```{r}
+env <- backtransform(download_model()$data)[2:7]
+```
+
+```{r}
+head(env)
+```
+
+Or, you can play around with your own data.
+
+1. Calculate the average alpha diversity of each patch
+
+```{r}
+aggregate(alpha_d0 ~ env$patch, FUN = mean)
+```
+
+2. Plots of diversity against environmental/landscape variables
+
+```{r}
+plot(comm_d0 ~ env$dist, log = "x",
+     xlab = "Distance to old-growth forests (m)",
+     ylab = "Tree species richness")
+```
+
+
+## Part II: Species accumulation
+
+When you have multiple samples in one area, the total number of species across the samples is (usually) higher than the average number of species per sample. This is because some samples have species that the other samples don't have.
+
+The second part of this session looks into estimating the _total_ number of species as samples accumulate. Some functions are available in the `vegan` package, but others are available in the `iNEXT` package.
+
+```{r}
+library(iNEXT)
+```
+
+
