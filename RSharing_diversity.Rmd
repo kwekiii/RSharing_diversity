@@ -13,7 +13,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 You're welcome to use your own data. Otherwise, you can use the data from the `novelforestSG` R package.
 
+test
+
 ```{r}
+
 library(novelforestSG)
 ```
 
@@ -46,7 +49,7 @@ comm_ba[1:10, 1:4]
 ```
 
 
-## Part I: Calculating diversity
+## Part I: Calculating observed diversity
 
 The first part of this session is on calculating various measures of 'diversity' for each sample, assemblage, etc. This is called $\alpha$ ('alpha') diversity, or 'local' diversity.
 
@@ -115,7 +118,7 @@ boxplot(cbind(alpha_d0, alpha_d1, alpha_d2),
         ylab = "Diversity")
 ```
 
-It might look like they're still not on the same 'scale', but in fact the reduction in value with increasing order represents the effect of evenness. The equivalent of a 'number of species' measure of diversity drops when the community is not perfectly even; vice versa, only when the community is perfectly even will Hill numbers with q>0 be exactly equal to that of q = 0.
+It might look like they're still not on the same 'scale', but in fact the reduction in value with increasing order represents the effect of evenness. Diversity should be expected to drop when the community is not perfectly even; vice versa, only when the community is perfectly even will Hill numbers with q>0 be exactly equal to that of q = 0.
 
 [shouldn't the ratio be indicative of evenness, then? but not perfectly aligned:]
 ```{r}
@@ -165,11 +168,11 @@ library(iNEXT)
 Let's treat all `r nrow(comm_stem)` plots as samples of one 'meta-community'.
 
 ```{r}
-comm_stem_meta <- colSums(comm_stem)
+comm_stem_all <- colSums(comm_stem)
 ```
 
 ```{r}
-gamma_comm_stem_meta <- iNEXT(comm_stem_meta, q = 0)
+gamma_comm_stem_all <- iNEXT(comm_stem_all, q = 0)
 ```
 
 ### ...with sample size
@@ -178,21 +181,25 @@ We know that the total number of species detected will increase with sampling ef
 
 ```{r}
 plot(qD ~ m,
-     data = gamma_comm_stem_meta$iNextEst$size_based,
+     data = gamma_comm_stem_all$iNextEst$size_based,
      type = "n", lty = 2,
      xlab = "No. of stems",
-     ylab = "Cumulative richness")
+     ylab = "Cumulative richness",
+     ylim = c(0, max(qD.UCL)))
+with(gamma_comm_stem_all$iNextEst$size_based,
+     polygon(c(m, rev(m)), c(qD.LCL, rev(qD.UCL)),
+             col = "pink", border = NA))
 lines(qD ~ m,
-     data = gamma_comm_stem_meta$iNextEst$size_based,
-     lty = 1)
+     data = gamma_comm_stem_all$iNextEst$size_based,
+     lty = 2, col = "red")
 lines(qD ~ m,
-     data = gamma_comm_stem_meta$iNextEst$size_based,
+     data = gamma_comm_stem_all$iNextEst$size_based,
      subset = Method == "Rarefaction",
-     lty = 1)
+     lty = 1, col = "red")
 points(qD ~ m,
-       data = gamma_comm_stem_meta$iNextEst$size_based,
+       data = gamma_comm_stem_all$iNextEst$size_based,
        subset = Method == "Observed",
-       pch = 16)
+       pch = 16, col = "red")
 ```
 
 Since many are familiar with ggplot, let's use ggplot to plot the species accumulation curve:
@@ -200,12 +207,12 @@ Since many are familiar with ggplot, let's use ggplot to plot the species accumu
 ```{r}
 library(ggplot2)
 
-ggplot(data = gamma_comm_stem_meta$iNextEst$size_based,
+ggplot(data = gamma_comm_stem_all$iNextEst$size_based,
        mapping = aes(x = m)) +
   geom_ribbon(mapping = aes(ymin = qD.LCL, ymax = qD.UCL), fill = "pink") +
   geom_line(mapping = aes(y = qD, linetype = Method), color = "red") +
   scale_linetype_manual(values = c("dashed", "blank", "solid")) +
-  geom_point(data = subset(gamma_comm_stem_meta$iNextEst$size_based,
+  geom_point(data = subset(gamma_comm_stem_all$iNextEst$size_based,
                            Method == "Observed"),
              mapping = aes(x = m, y = qD), color = "red")
 ```
@@ -214,19 +221,49 @@ The common 'wisdom' is that sampling is complete when the curve approaches a pla
 
 Another common 'wisdom' is that you can only compare total number of species between two (meta-)communities at the same level of sampling effort. But is the number of individuals a good measure of sampling effort?
 
-### ... with sampling coverage
+### ...with sampling coverage
 
+An alternative measure of sampling effort is 'sampling coverage'. This is the proportion of the (true) total number of individuals that are represented by the species captured by the sampling.
 
+You can plot this by replacing:
+
+- `$size_based` with `$coverage_based`;
+- `m` with `SC`
+
+when plotting the iNEXT object.
 
 ```{r}
-ggplot(data = gamma_comm_stem_meta$iNextEst$coverage_based,
+ggplot(data = gamma_comm_stem_all$iNextEst$coverage_based,
        mapping = aes(x = SC)) +
   geom_ribbon(mapping = aes(ymin = qD.LCL, ymax = qD.UCL), fill = "pink") +
   geom_line(mapping = aes(y = qD, linetype = Method), color = "red") +
   scale_linetype_manual(values = c("dashed", "blank", "solid")) +
-  geom_point(data = subset(gamma_comm_stem_meta$iNextEst$size_based,
+  geom_point(data = subset(gamma_comm_stem_all$iNextEst$size_based,
                            Method == "Observed"),
              mapping = aes(x = SC, y = qD), color = "red")
 ```
 
+When you have multiple (meta-)communities, you should compare them at the same level of _sampling coverage_. The recommended level of sampling coverage to make the comparisons is the minimum sampling coverage among the (meta-)commnunities when the species accumulation curves are extrapolated to double their _sample sizes_.
+
 ### Try it out yourself
+
+Generate the species accumulation for each patch of forest and compare them at a same level of sampling coverage.
+
+
+```{r}
+patch_names <- unique(env$patch)
+
+comm_stem_bypatch <- vector("list", length = length(patch_names))
+for(i in 1:length(patch_names)) {
+  comm_stem_bypatch[[i]] <- colSums(comm_stem[env$patch == patch_names[i],])
+}
+
+# alternatively,
+# comm_stem_bypatch <- lapply(patch_names, function(x) colSums(comm_stem[env$patch == x,]))
+
+names(comm_stem_bypatch) <- patch_names
+
+
+gamma_comm_stem_bypatch <- iNEXT(comm_stem_bypatch, q = 0)
+```
+
